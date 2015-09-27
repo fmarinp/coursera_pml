@@ -1,0 +1,100 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Felipe A Marín"
+date: "28 September 2015"
+output: html_document
+---
+
+Here we want to predict the correctness of execution of an exercise ('classe' variable) - a bicep curl,
+from sensor data. The data comes from the research project ['Qualitative Activity Recognition of
+Weight Lifting Exercises'](http://groupware.les.inf.puc-rio.br/har) by the Groupware@LES group at Pontifícia 
+Universidade Católica do Rio de Janeiro in Brasil. 
+
+The first step is to explore the training data:
+```{r,echo=t}
+hw_training_set <- read.csv('pml-training.csv')
+```
+This loads a data frame with 11532 observations of 160 variables. Looking up at the table and reading the 
+information from the paper of the Brazilian research groupe, it is clear that a thorough data cleaning 
+process is needed, and we shall try to minimize the number of variables needed. 
+
+Firstly, from the information of the research project (see coursera page for references), 
+we have two types of rows: shorter 'exposures' and 'longer' ones, that average
+some of the instrument readings. Since the question 
+(testing) set contains only shorter exposres, 
+we erase the longer exposures (the rows containing 'yes' in the 'new_window' column). 
+```{r,echo=T}
+#eliminate rows with new_window = 'yes' (averages of other cols are calculated here)
+yes_rows <- which(hw_training_set$new_window %in% 'yes')
+tr_pml <- hw_training_set[-yes_rows,]#store in new variable
+```
+We now have to prune the number of columns. First, we look for 'Near Zero Variables' - variables (columns) 
+with low variability (not good predictors):
+```{r,echo=T,warning=F,message=FALSE}
+library(caret)
+#pruning: looking for the non-zero variables
+nzv_training <- nearZeroVar(tr_pml, saveMetrics=T)
+cols_yes <- NULL #columns that we will keep
+counter <- 0 
+for (i in 8:160) #first 8 columns are just labels, not measurements
+{
+  if (nzv_training$nzv[i]==F){
+   yy <- table(is.na(tr_pml[,i])) #check also for those columns with NA values (are avergaes)
+   if (dim(yy)==1){
+    counter <- counter + 1
+    cols_yes[counter] <- i 
+    }
+  }
+}
+tr_pml<- tr_pml[,cols_yes] #subsample only the 'variable-enough' (measurements) columns
+```
+This lowers the number of columns to 53. In addition, we observe that many columns have measure along
+the x, y and z axis but the data also stores derivatives of these values, for instance
+total acceleration, variance of  pitch, and variance of roll in each sensor. Then we eliminate the measurements
+along the axis (i.e column names ending in '_x', '_y', '_z'):
+```{r,echo=T,warning=F,message=FALSE}
+X <- colnames(tr_pml)
+colx <- X[grepl('*_x',X)] #select columns ending en '_x'
+coly <- X[grepl('*_y',X)] #select columns ending en '_y'
+colz <- X[grepl('*_z',X)] #select columns ending en '_z'
+cols_axis <- c(colx,coly,colz)
+tr_pml <- tr_pml[,-which(names(tr_pml) %in% cols_axis)] #eliminate selected columns
+```
+This leaves us with a data frame with 17 variables, a more manageable number to carry out machine 
+learning algorithms in a simple desktop. We proceed to divide now the data in a training set and a 
+testing (cross-validation) set:
+```{r,echo=T,warning=F,message=FALSE}
+set.seed(2000)
+inTrain_index <- createDataPartition(tr_pml$classe,p=0.6,list=FALSE)
+training_pml <- tr_pml[inTrain_index,] #training set - 60% of observations
+testxval_pml <- tr_pml[-inTrain_index,]
+```
+Now we apply our prediction algorithm to our training set - it will be a 'random forests' machine
+learning algorithm:
+```{r,echo=T,warning=F,message=F}
+library(randomForest)
+modFit <- randomForest(classe ~ ., data=training_pml,method='rf')
+#modFit <- train(classe ~ ., data=training_pml,method='rf')
+modFit
+```
+We show above the confusion matrix for the training data, with a testing overall error rate of
+1.06%. Now for the cross-validation data:
+```{r,echo=T,warning=F,message=F}
+classe_xval <- predict(modFit,testxval_pml)
+confusionMatrix(classe_xval,testxval_pml$classe)
+```
+with a similar error rate (Accuracy). We can conclude that our model can predict with approximately
+99% accuracy the class of exercise based on values of the sensors. 
+
+Posteriourly we applied the algorithm to the 'submission' test data, uploaded to the 
+coursera course page. It consisted in 20 measurements. We had 100% accuracy in predicting
+the class values for this set, consisting in:  
+```{r,echo=F}
+c1 <- c(1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20) 
+c2 <- c('B',  'A',  'B',  'A',  'A',  'E',  'D',  'B',  'A',  'A',  'B',  'C',  'B',  'A',  'E',  'E',  'A',  'B','B','B')
+m <- matrix(c(c1,c2),nrow=20,ncol=2)
+m
+```
+
+
+
